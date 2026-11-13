@@ -53,7 +53,7 @@ fn parse_describe_topic_partitions(
     let array_len = reader.read_u8()? as usize;
 
     if array_len != 2 {
-        return Err(io::ErrorKind::InvalidData.into());
+        return Err(io_invalid_data("expect exactly 1 topic in the array"));
     }
 
     let topic_name = reader.read_compact_string()?;
@@ -95,17 +95,22 @@ impl<'a> Reader<'a> {
     fn read_compact_string(&mut self) -> io::Result<String> {
         let len = self.read_u8()? as usize;
         if len == 0 {
-            return Err(io::ErrorKind::InvalidData.into());
+            return Err(io_invalid_data("empty string"));
         }
         let bytes = self.read_bytes(len - 1)?;
-        let s = std::str::from_utf8(bytes).map_err(|_| io::ErrorKind::InvalidData)?;
+        let s = std::str::from_utf8(bytes)
+            .map_err(|_| io_invalid_data("read_compact_string: invalid utf8"))?;
 
         Ok(s.to_owned())
     }
     fn read_tag_buffer(&mut self) -> io::Result<()> {
         if self.read_u8()? != 0 {
-            return Err(io::ErrorKind::InvalidData.into());
+            return Err(io_invalid_data("expect tag buffer to be 0"));
         }
         Ok(())
     }
+}
+
+fn io_invalid_data(msg: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, msg)
 }
