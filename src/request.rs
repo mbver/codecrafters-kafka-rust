@@ -50,7 +50,7 @@ pub fn parse_request(stream: &mut TcpStream) -> io::Result<Request> {
 fn parse_describe_topic_partitions(
     reader: &mut Reader,
 ) -> io::Result<DescribeTopicPartitionsRequest> {
-    let array_len = reader.read_u8()? as usize;
+    let array_len = reader.read_uvarint()?;
 
     if array_len != 2 {
         return Err(io_invalid_data(&format!(
@@ -95,10 +95,25 @@ impl<'a> Reader<'a> {
         let bytes = self.read_bytes(4)?;
         Ok(i32::from_be_bytes(bytes.try_into().unwrap()))
     }
+    fn read_uvarint(&mut self) -> io::Result<usize> {
+        let mut value = 0usize;
+        let mut shift = 0;
+        loop {
+            let byte = self.read_u8()?;
+            value |= ((byte & 0x7f) as usize) << shift;
+            if byte & 0x80 == 0 {
+                return Ok(value);
+            }
+            shift += 7;
+            if shift >= usize::BITS {
+                return Err(io_invalid_data("uvarint overflow"));
+            }
+        }
+    }
     fn read_compact_string(&mut self) -> io::Result<String> {
-        let len = self.read_u8()? as usize;
+        let len = self.read_uvarint()?;
         if len == 0 {
-            return Err(io_invalid_data("empty string"));
+            return Err(io_invalid_data("null compact string"));
         }
         let bytes = self.read_bytes(len - 1)?;
         let s = std::str::from_utf8(bytes)
