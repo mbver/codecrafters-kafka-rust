@@ -1,8 +1,11 @@
 use std::{io::Write, net::TcpStream};
 
 use crate::{
-    request::{Request, parse_request},
-    response::{ApiKey, ApiVersionsResponse, Response, ResponseBody},
+    request::{Request, RequestBody, parse_request},
+    response::{
+        ApiKey, ApiVersionsResponse, DescribeTopicPartitionsResponse, Response, ResponseBody,
+        TopicMetadata,
+    },
 };
 
 pub struct Handler;
@@ -25,6 +28,14 @@ impl Handler {
         }
     }
     fn handle_request(&self, request: &Request) -> Response {
+        match &request.body {
+            RequestBody::ApiVersions => self.handle_api_version(request),
+            RequestBody::DescribeTopicPartitions(_) => {
+                self.handle_describe_topic_partitions(request)
+            }
+        }
+    }
+    fn handle_api_version(&self, request: &Request) -> Response {
         let error_code = if (0..=4).contains(&request.api_version) {
             0i16
         } else {
@@ -47,6 +58,26 @@ impl Handler {
                     },
                 ],
                 throttle_time_ms: 0,
+            }),
+        }
+    }
+    fn handle_describe_topic_partitions(&self, request: &Request) -> Response {
+        let RequestBody::DescribeTopicPartitions(body) = &request.body else {
+            unreachable!()
+        };
+        Response {
+            correlation_id: request.correlation_id,
+            body: ResponseBody::DescribeTopicPartitions(DescribeTopicPartitionsResponse {
+                throttle_time_ms: 0,
+                topics: vec![TopicMetadata {
+                    error_code: 3,
+                    topic_name: body.topic_name.clone(),
+                    topic_id: [0u8; 16],
+                    is_internal: false,
+                    partitions: vec![],
+                    topic_authorized_operations: 0,
+                }],
+                next_cursor: -1,
             }),
         }
     }
