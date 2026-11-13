@@ -54,8 +54,9 @@ fn parse_describe_topic_partitions(
 
     if array_len != 2 {
         return Err(io_invalid_data(&format!(
-            "expect exactly 1 topic in the array, got {}",
-            array_len - 1
+            "expect exactly 1 topic in the array, got {}, remaining: {:?}",
+            array_len - 1,
+            reader.buf,
         )));
     }
 
