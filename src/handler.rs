@@ -34,11 +34,18 @@ impl Handler {
             correlation_id: request.correlation_id,
             body: ResponseBody::ApiVersions(ApiVersionsResponse {
                 error_code,
-                api_keys: vec![ApiKey {
-                    api_key: 18,
-                    min_version: 0,
-                    max_version: 4,
-                }],
+                api_keys: vec![
+                    ApiKey {
+                        api_key: 18,
+                        min_version: 0,
+                        max_version: 4,
+                    },
+                    ApiKey {
+                        api_key: 75,
+                        min_version: 0,
+                        max_version: 0,
+                    },
+                ],
                 throttle_time_ms: 0,
             }),
         }
