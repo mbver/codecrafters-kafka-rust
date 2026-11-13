@@ -106,7 +106,7 @@ impl Response {
         match &self.body {
             ResponseBody::ApiVersions(body) => body.serialize_into(&mut buf),
         }
-        let msg_size = buf.len() - 4;
+        let msg_size = (buf.len() - 4) as i32;
         buf[..4].copy_from_slice(&msg_size.to_be_bytes());
         buf
     }
