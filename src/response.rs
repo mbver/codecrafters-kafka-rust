@@ -134,6 +134,7 @@ pub struct TopicMetadata {
 
 impl DescribeTopicPartitionsResponse {
     fn serialize_into(&self, writer: &mut Writer) {
+        writer.write_tag_buffer();
         writer.write_i32(self.throttle_time_ms);
 
         writer.write_compact_array_len(self.topics.len());
