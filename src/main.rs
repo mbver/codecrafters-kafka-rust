@@ -23,9 +23,15 @@ fn main() {
                         continue;
                     }
                 };
+                let error_code = if (0..=4).contains(&request.api_version) {
+                    0i16
+                } else {
+                    35i16
+                };
                 let mut resp = Vec::<u8>::new();
                 resp.extend_from_slice(&0i32.to_be_bytes());
                 resp.extend_from_slice(&request.correlation_id.to_be_bytes());
+                resp.extend_from_slice(&error_code.to_be_bytes());
                 stream.write_all(&resp).expect("fail to write to stream");
             }
             Err(e) => {
