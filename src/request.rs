@@ -103,6 +103,7 @@ impl<'a> Reader<'a> {
         let mut shift = 0;
         loop {
             let byte = self.read_u8()?;
+            // extract 7-bit data, shift them into position and merge into accumulated value
             value |= ((byte & 0x7f) as usize) << shift;
             if byte & 0x80 == 0 {
                 return Ok(value);

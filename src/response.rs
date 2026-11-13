@@ -17,6 +17,8 @@ impl Writer {
     fn write_bytes(&mut self, bytes: &[u8]) {
         self.buf.extend_from_slice(bytes);
     }
+    // only 7 bits in a byte used. bit 7 indicates whether next byte follows
+    // 0x80 = 10000000
     fn write_uvarint(&mut self, mut value: u32) {
         while value >= 0x80 {
             self.buf.push((value as u8) | 0x80);
