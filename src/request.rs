@@ -31,6 +31,8 @@ pub fn parse_request(stream: &mut TcpStream) -> io::Result<Request> {
     let api_key = reader.read_i16()?;
     let api_version = reader.read_i16()?;
     let correlation_id = reader.read_i32()?;
+    let _client_id = reader.read_nullable_string()?;
+    reader.read_tag_buffer()?;
     let body = match api_key {
         18 => RequestBody::ApiVersions,
         75 => {
@@ -121,6 +123,23 @@ impl<'a> Reader<'a> {
             .map_err(|_| io_invalid_data("read_compact_string: invalid utf8"))?;
 
         Ok(s.to_owned())
+    }
+    fn read_nullable_string(&mut self) -> io::Result<Option<String>> {
+        let len = self.read_i16()?;
+
+        if len == -1 {
+            return Ok(None);
+        }
+
+        if len < -1 {
+            return Err(io_invalid_data("invalid nullable string length"));
+        }
+
+        let bytes = self.read_bytes(len as usize)?;
+        let s = std::str::from_utf8(bytes)
+            .map_err(|_| io_invalid_data("read_nullable_string: invalid utf8"))?;
+
+        Ok(Some(s.to_owned()))
     }
     fn read_tag_buffer(&mut self) -> io::Result<()> {
         if self.read_u8()? != 0 {
