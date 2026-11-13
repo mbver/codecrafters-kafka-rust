@@ -53,7 +53,10 @@ fn parse_describe_topic_partitions(
     let array_len = reader.read_u8()? as usize;
 
     if array_len != 2 {
-        return Err(io_invalid_data("expect exactly 1 topic in the array"));
+        return Err(io_invalid_data(&format!(
+            "expect exactly 1 topic in the array, got {}",
+            array_len - 1
+        )));
     }
 
     let topic_name = reader.read_compact_string()?;
