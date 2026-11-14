@@ -1,6 +1,7 @@
-use std::{io::Write, net::TcpStream};
+use std::{io::Write, net::TcpStream, sync::Arc};
 
 use crate::{
+    metadata::Metadata,
     request::{Request, RequestBody, parse_request},
     response::{
         ApiKey, ApiVersionsResponse, DescribeTopicPartitionsResponse, Response, ResponseBody,
@@ -8,9 +9,14 @@ use crate::{
     },
 };
 
-pub struct Handler;
+pub struct Handler {
+    metadata: Arc<Metadata>,
+}
 
 impl Handler {
+    pub fn new(metadata: Arc<Metadata>) -> Self {
+        Self { metadata }
+    }
     pub fn handle(&self, mut stream: TcpStream) {
         loop {
             let request = match parse_request(&mut stream) {
@@ -65,20 +71,45 @@ impl Handler {
         let RequestBody::DescribeTopicPartitions(body) = &request.body else {
             unreachable!()
         };
-        Response {
-            correlation_id: request.correlation_id,
-            body: ResponseBody::DescribeTopicPartitions(DescribeTopicPartitionsResponse {
-                throttle_time_ms: 0,
-                topics: vec![TopicMetadata {
-                    error_code: 3,
-                    topic_name: body.topic_name.clone(),
-                    topic_id: [0u8; 16],
-                    is_internal: false,
-                    partitions: vec![],
-                    topic_authorized_operations: 0,
-                }],
-                next_cursor: -1,
-            }),
+        let id = self.metadata.topic_names.get(&body.topic_name);
+        match id {
+            Some(id) => {
+                let topic = self.metadata.topics.get(&id).unwrap();
+                Response {
+                    correlation_id: request.correlation_id,
+                    body: ResponseBody::DescribeTopicPartitions(DescribeTopicPartitionsResponse {
+                        throttle_time_ms: 0,
+                        topics: vec![TopicMetadata {
+                            error_code: 0,
+                            topic_name: body.topic_name.clone(),
+                            topic_id: id.as_bytes().clone(),
+                            is_internal: true, // is this correct?
+                            partitions: topic
+                                .partitions
+                                .iter()
+                                .map(|(&id, partition)| (id, partition).into())
+                                .collect(),
+                            topic_authorized_operations: 0, // is this correct?
+                        }],
+                        next_cursor: -1,
+                    }),
+                }
+            }
+            None => Response {
+                correlation_id: request.correlation_id,
+                body: ResponseBody::DescribeTopicPartitions(DescribeTopicPartitionsResponse {
+                    throttle_time_ms: 0,
+                    topics: vec![TopicMetadata {
+                        error_code: 3,
+                        topic_name: body.topic_name.clone(),
+                        topic_id: [0u8; 16],
+                        is_internal: false,
+                        partitions: vec![],
+                        topic_authorized_operations: 0,
+                    }],
+                    next_cursor: -1,
+                }),
+            },
         }
     }
 }

@@ -3,6 +3,8 @@ use std::{
     net::TcpStream,
 };
 
+use crate::reader::{Reader, io_invalid_data};
+
 pub struct Request {
     pub api_key: i16,
     pub api_version: i16,
@@ -56,9 +58,8 @@ fn parse_describe_topic_partitions(
 
     if array_len != 2 {
         return Err(io_invalid_data(&format!(
-            "expect exactly 1 topic in the array, got {}, remaining: {:?}",
+            "expect exactly 1 topic in the array, got {}",
             array_len - 1,
-            reader.buf,
         )));
     }
 
@@ -67,89 +68,4 @@ fn parse_describe_topic_partitions(
     reader.read_tag_buffer()?; // request tag buffer
 
     Ok(DescribeTopicPartitionsRequest { topic_name })
-}
-struct Reader<'a> {
-    buf: &'a [u8],
-    offset: usize,
-}
-
-impl<'a> Reader<'a> {
-    fn new(buf: &'a [u8]) -> Self {
-        Self { buf, offset: 0 }
-    }
-    fn read_bytes(&mut self, n: usize) -> io::Result<&'a [u8]> {
-        let end = self.offset + n;
-        let bytes = self
-            .buf
-            .get(self.offset..end)
-            .ok_or(io::ErrorKind::UnexpectedEof)?;
-        self.offset = end;
-        Ok(bytes)
-    }
-    fn read_u8(&mut self) -> io::Result<u8> {
-        Ok(self.read_bytes(1)?[0])
-    }
-
-    fn read_i16(&mut self) -> io::Result<i16> {
-        let bytes = self.read_bytes(2)?;
-        Ok(i16::from_be_bytes(bytes.try_into().unwrap()))
-    }
-    fn read_i32(&mut self) -> io::Result<i32> {
-        let bytes = self.read_bytes(4)?;
-        Ok(i32::from_be_bytes(bytes.try_into().unwrap()))
-    }
-    fn read_uvarint(&mut self) -> io::Result<usize> {
-        let mut value = 0usize;
-        let mut shift = 0;
-        loop {
-            let byte = self.read_u8()?;
-            // extract 7-bit data, shift them into position and merge into accumulated value
-            value |= ((byte & 0x7f) as usize) << shift;
-            if byte & 0x80 == 0 {
-                return Ok(value);
-            }
-            shift += 7;
-            if shift >= usize::BITS {
-                return Err(io_invalid_data("uvarint overflow"));
-            }
-        }
-    }
-    fn read_compact_string(&mut self) -> io::Result<String> {
-        let len = self.read_uvarint()?;
-        if len == 0 {
-            return Err(io_invalid_data("null compact string"));
-        }
-        let bytes = self.read_bytes(len - 1)?;
-        let s = std::str::from_utf8(bytes)
-            .map_err(|_| io_invalid_data("read_compact_string: invalid utf8"))?;
-
-        Ok(s.to_owned())
-    }
-    fn read_nullable_string(&mut self) -> io::Result<Option<String>> {
-        let len = self.read_i16()?;
-
-        if len == -1 {
-            return Ok(None);
-        }
-
-        if len < -1 {
-            return Err(io_invalid_data("invalid nullable string length"));
-        }
-
-        let bytes = self.read_bytes(len as usize)?;
-        let s = std::str::from_utf8(bytes)
-            .map_err(|_| io_invalid_data("read_nullable_string: invalid utf8"))?;
-
-        Ok(Some(s.to_owned()))
-    }
-    fn read_tag_buffer(&mut self) -> io::Result<()> {
-        if self.read_u8()? != 0 {
-            return Err(io_invalid_data("expect tag buffer to be 0"));
-        }
-        Ok(())
-    }
-}
-
-fn io_invalid_data(msg: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, msg)
 }

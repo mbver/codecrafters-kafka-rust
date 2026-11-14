@@ -1,3 +1,5 @@
+use crate::metadata::Partition;
+
 struct Writer {
     buf: Vec<u8>,
 }
@@ -147,8 +149,9 @@ impl DescribeTopicPartitionsResponse {
             writer.write_bool(topic.is_internal);
 
             writer.write_compact_array_len(topic.partitions.len());
-            // Serialize each partition here when you implement them.
-
+            for partition in &topic.partitions {
+                partition.serialize_into(writer);
+            }
             writer.write_i32(topic.topic_authorized_operations);
             writer.write_tag_buffer();
         }
@@ -157,4 +160,67 @@ impl DescribeTopicPartitionsResponse {
         writer.write_tag_buffer();
     }
 }
-pub struct PartitionMetadata;
+
+pub struct PartitionMetadata {
+    pub error_code: i16,
+    pub partition_index: i32,
+    pub leader_id: i32,
+    pub leader_epoch: i32,
+    pub replica_nodes: Vec<i32>,
+    pub isr_nodes: Vec<i32>,
+    pub eligible_leader_replicas: Vec<i32>,
+    pub last_known_elr: Vec<i32>,
+    pub offline_replicas: Vec<i32>,
+}
+
+impl From<(i32, &Partition)> for PartitionMetadata {
+    fn from((partition_index, partition): (i32, &Partition)) -> Self {
+        Self {
+            error_code: 0,
+            partition_index,
+            leader_id: partition.leader,
+            leader_epoch: partition.leader_epoch,
+            replica_nodes: partition.replicas.clone(),
+            isr_nodes: partition.isr.clone(),
+            eligible_leader_replicas: vec![],
+            last_known_elr: vec![],
+            offline_replicas: vec![],
+        }
+    }
+}
+
+impl PartitionMetadata {
+    fn serialize_into(&self, writer: &mut Writer) {
+        writer.write_i16(self.error_code);
+        writer.write_i32(self.partition_index);
+        writer.write_i32(self.leader_id);
+        writer.write_i32(self.leader_epoch);
+
+        writer.write_compact_array_len(self.replica_nodes.len());
+        for &node in &self.replica_nodes {
+            writer.write_i32(node);
+        }
+
+        writer.write_compact_array_len(self.isr_nodes.len());
+        for &node in &self.isr_nodes {
+            writer.write_i32(node);
+        }
+
+        writer.write_compact_array_len(self.eligible_leader_replicas.len());
+        for &node in &self.eligible_leader_replicas {
+            writer.write_i32(node);
+        }
+
+        writer.write_compact_array_len(self.last_known_elr.len());
+        for &node in &self.last_known_elr {
+            writer.write_i32(node);
+        }
+
+        writer.write_compact_array_len(self.offline_replicas.len());
+        for &node in &self.offline_replicas {
+            writer.write_i32(node);
+        }
+
+        writer.write_tag_buffer();
+    }
+}
