@@ -160,7 +160,8 @@ fn read_batch(file: &mut BufReader<File>) -> io::Result<Option<RecordBatch>> {
     }
     let base_offset = read_i64(file)?;
     let batch_length = read_i32(file)?;
-
+    println!("====== base_offset: {base_offset}");
+    println!("====== batch_length: {batch_length}");
     if batch_length < 0 {
         return Err(io_invalid_data("negative batch length"));
     }
