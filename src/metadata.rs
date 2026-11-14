@@ -223,13 +223,16 @@ fn read_record(reader: &mut Reader<'_>) -> io::Result<Record> {
     if record_length < 0 {
         return Err(io_invalid_data("negative record length"));
     }
+    println!("=========== record length: {record_length}");
     let record_buf = reader.read_bytes(record_length as usize)?;
     let mut record_reader = Reader::new(record_buf);
 
     let attributes = record_reader.read_i8()?;
+    println!("========= attriubte: {attributes}");
     let timestamp_delta = record_reader.read_varlong()?;
+    println!("======== timestamp delta: {timestamp_delta}");
     let offset_delta = record_reader.read_varint()?;
-
+    println!("========= offset_delta: {offset_delta}");
     let key_length = record_reader.read_varint()?;
     let key = record_reader.read_bytes(key_length as usize)?.to_vec();
 
