@@ -154,6 +154,7 @@ pub fn replay_file(path: &str) -> io::Result<Metadata> {
 }
 
 fn read_batch(file: &mut BufReader<File>) -> io::Result<Option<RecordBatch>> {
+    println!("====== start reading batch");
     if file.fill_buf()?.is_empty() {
         return Ok(None);
     }
@@ -217,6 +218,7 @@ fn read_i32(file: &mut BufReader<File>) -> io::Result<i32> {
 }
 
 fn read_record(reader: &mut Reader<'_>) -> io::Result<Record> {
+    println!("========= start reading record");
     let record_length = reader.read_varint()?;
     if record_length < 0 {
         return Err(io_invalid_data("negative record length"));
@@ -252,6 +254,7 @@ fn read_record(reader: &mut Reader<'_>) -> io::Result<Record> {
     })
 }
 fn read_metadata_record(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
+    println!("======== start reading metadata record");
     let frame_version = reader.read_u8()?;
     if frame_version != 0 {
         return Err(io_invalid_data("unsupported frame version"));
@@ -271,6 +274,7 @@ fn read_metadata_record(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
 }
 
 fn read_feature_level(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
+    println!("===== read feature level");
     let name = reader.read_compact_string()?;
     let feature_level = reader.read_i16()?;
     reader.skip_tagged_fields()?;
@@ -282,6 +286,7 @@ fn read_feature_level(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
 }
 
 fn read_topic(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
+    println!("========= read topic");
     let name = reader.read_compact_string()?;
     let topic_id = reader.read_uuid()?;
     reader.skip_tagged_fields()?;
@@ -290,6 +295,7 @@ fn read_topic(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
 }
 
 fn read_partition(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
+    println!("========== read partition");
     let partition_id = reader.read_i32()?;
     let topic_id = reader.read_uuid()?;
 
