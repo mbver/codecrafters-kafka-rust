@@ -15,7 +15,7 @@ impl<'a> Reader<'a> {
         let end = self
             .offset
             .checked_add(n)
-            .ok_or_else(|| io_invalid_data("offset overflow"))?;
+            .ok_or_else(|| io_invalid_data(&format!("offset overflow after adding: {n}")))?;
 
         let bytes = self
             .buf
