@@ -234,13 +234,22 @@ fn read_record(reader: &mut Reader<'_>) -> io::Result<Record> {
     let offset_delta = record_reader.read_varint()?;
     println!("========= offset_delta: {offset_delta}");
     let key_length = record_reader.read_varint()?;
+    println!("========= key_length: {key_length}");
+
     let key = record_reader.read_bytes(key_length as usize)?.to_vec();
+    println!("========= key: {:?}", key);
 
     let value_length = record_reader.read_varint()?;
+    println!("========= value_length: {value_length}");
+
     let value_buf = record_reader.read_bytes(value_length as usize)?;
+    println!("========= value_buf: {:?}", value_buf);
+
     let mut value_reader = Reader::new(value_buf);
 
     let value = read_metadata_record(&mut value_reader)?;
+    println!("========= value done?");
+
     if !value_reader.is_empty() {
         return Err(io_invalid_data("unconsumed metadata record bytes"));
     }
