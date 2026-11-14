@@ -4,8 +4,8 @@ use crate::{
     metadata::Metadata,
     request::{Request, RequestBody, parse_request},
     response::{
-        ApiKey, ApiVersionsResponse, DescribeTopicPartitionsResponse, Response, ResponseBody,
-        TopicMetadata,
+        ApiKey, ApiVersionsResponse, DescribeTopicPartitionsResponse, PartitionMetadata, Response,
+        ResponseBody, TopicMetadata,
     },
 };
 
@@ -75,6 +75,12 @@ impl Handler {
         match id {
             Some(id) => {
                 let topic = self.metadata.topics.get(&id).unwrap();
+                let mut partitions: Vec<PartitionMetadata> = topic
+                    .partitions
+                    .iter()
+                    .map(|(&id, partition)| (id, partition).into())
+                    .collect();
+                partitions.sort_by_key(|p| p.partition_index);
                 Response {
                     correlation_id: request.correlation_id,
                     body: ResponseBody::DescribeTopicPartitions(DescribeTopicPartitionsResponse {
@@ -84,11 +90,7 @@ impl Handler {
                             topic_name: body.topic_name.clone(),
                             topic_id: id.as_bytes().clone(),
                             is_internal: true, // is this correct?
-                            partitions: topic
-                                .partitions
-                                .iter()
-                                .map(|(&id, partition)| (id, partition).into())
-                                .collect(),
+                            partitions,
                             topic_authorized_operations: 0, // is this correct?
                         }],
                         next_cursor: -1,
