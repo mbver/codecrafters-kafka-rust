@@ -26,7 +26,7 @@ struct Record {
     attributes: i8,
     timestamp_delta: i64,
     offset_delta: i32,
-    key: Vec<u8>,
+    key: Option<Vec<u8>>,
     value: Option<MetadataRecord>,
 }
 
@@ -139,12 +139,11 @@ pub struct Partition {
     pub directories: Vec<Uuid>,
 }
 
-pub fn replay_file(path: &str) -> io::Result<Metadata> {
-    let file = File::open(path)?;
-    let mut file = BufReader::new(file);
+pub fn replay<R: Read>(reader: R) -> io::Result<Metadata> {
+    let mut reader = BufReader::new(reader);
     let mut metadata = Metadata::new();
 
-    while let Some(batch) = read_batch(&mut file)? {
+    while let Some(batch) = read_batch(&mut reader)? {
         for record in batch.records {
             metadata.apply(record)?;
         }
@@ -153,15 +152,17 @@ pub fn replay_file(path: &str) -> io::Result<Metadata> {
     Ok(metadata)
 }
 
-fn read_batch(file: &mut BufReader<File>) -> io::Result<Option<RecordBatch>> {
-    println!("====== start reading batch");
+pub fn replay_file(path: &str) -> io::Result<Metadata> {
+    let file = File::open(path)?;
+    replay(file)
+}
+
+fn read_batch(file: &mut BufReader<impl Read>) -> io::Result<Option<RecordBatch>> {
     if file.fill_buf()?.is_empty() {
         return Ok(None);
     }
     let base_offset = read_i64(file)?;
     let batch_length = read_i32(file)?;
-    println!("====== base_offset: {base_offset}");
-    println!("====== batch_length: {batch_length}");
     if batch_length < 0 {
         return Err(io_invalid_data("negative batch length"));
     }
@@ -206,50 +207,44 @@ fn read_batch(file: &mut BufReader<File>) -> io::Result<Option<RecordBatch>> {
     }))
 }
 
-fn read_i64(file: &mut BufReader<File>) -> io::Result<i64> {
+fn read_i64(file: &mut BufReader<impl Read>) -> io::Result<i64> {
     let mut buf = [0u8; 8];
     file.read_exact(&mut buf)?;
     Ok(i64::from_be_bytes(buf))
 }
 
-fn read_i32(file: &mut BufReader<File>) -> io::Result<i32> {
+fn read_i32(file: &mut BufReader<impl Read>) -> io::Result<i32> {
     let mut buf = [0u8; 4];
     file.read_exact(&mut buf)?;
     Ok(i32::from_be_bytes(buf))
 }
 
 fn read_record(reader: &mut Reader<'_>) -> io::Result<Record> {
-    println!("========= start reading record");
     let record_length = reader.read_varint()?;
     if record_length < 0 {
         return Err(io_invalid_data("negative record length"));
     }
-    println!("=========== record length: {record_length}");
     let record_buf = reader.read_bytes(record_length as usize)?;
     let mut record_reader = Reader::new(record_buf);
 
     let attributes = record_reader.read_i8()?;
-    println!("========= attriubte: {attributes}");
     let timestamp_delta = record_reader.read_varlong()?;
-    println!("======== timestamp delta: {timestamp_delta}");
     let offset_delta = record_reader.read_varint()?;
-    println!("========= offset_delta: {offset_delta}");
     let key_length = record_reader.read_varint()?;
-    println!("========= key_length: {key_length}");
-
-    let key = record_reader.read_bytes(key_length as usize)?.to_vec();
-    println!("========= key: {:?}", key);
+    let key = match key_length {
+        -1 => None,
+        0 => Some(vec![]),
+        n if n > 0 => Some(record_reader.read_bytes(n as usize)?.to_vec()),
+        n => return Err(io_invalid_data(&format!("invalid key length: {n}"))),
+    };
 
     let value_length = record_reader.read_varint()?;
-    println!("========= value_length: {value_length}");
 
     let value_buf = record_reader.read_bytes(value_length as usize)?;
-    println!("========= value_buf: {:?}", value_buf);
 
     let mut value_reader = Reader::new(value_buf);
 
     let value = read_metadata_record(&mut value_reader)?;
-    println!("========= value done?");
 
     if !value_reader.is_empty() {
         return Err(io_invalid_data("unconsumed metadata record bytes"));
@@ -267,18 +262,14 @@ fn read_record(reader: &mut Reader<'_>) -> io::Result<Record> {
     })
 }
 fn read_metadata_record(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
-    println!("======== start reading metadata record");
-    let frame_version = reader.read_u8()?;
-    if frame_version != 0 {
-        return Err(io_invalid_data("unsupported frame version"));
-    }
+    let _frame_version = reader.read_u8()?;
     let record_type = reader.read_u8()?;
     let _version = reader.read_u8()?;
 
     match record_type {
         0x0c => read_feature_level(reader),
-        0x1 => read_topic(reader),
-        0x2 => read_partition(reader),
+        0x2 => read_topic(reader),
+        0x3 => read_partition(reader),
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "unknown metadata record type",
@@ -287,7 +278,6 @@ fn read_metadata_record(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
 }
 
 fn read_feature_level(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
-    println!("===== read feature level");
     let name = reader.read_compact_string()?;
     let feature_level = reader.read_i16()?;
     reader.skip_tagged_fields()?;
@@ -299,7 +289,6 @@ fn read_feature_level(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
 }
 
 fn read_topic(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
-    println!("========= read topic");
     let name = reader.read_compact_string()?;
     let topic_id = reader.read_uuid()?;
     reader.skip_tagged_fields()?;
@@ -308,7 +297,6 @@ fn read_topic(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
 }
 
 fn read_partition(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
-    println!("========== read partition");
     let partition_id = reader.read_i32()?;
     let topic_id = reader.read_uuid()?;
 
@@ -337,4 +325,132 @@ fn read_partition(reader: &mut Reader<'_>) -> io::Result<MetadataRecord> {
         partition_epoch,
         directories,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+    #[test]
+    fn replay_file_test() {
+        let content: Vec<u8> = vec![
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, //base-offset
+            0x00, 0x00, 0x00, 0x4f, // batch-length
+            0x00, 0x00, 0x00, 0x01, // partition leader epoch
+            0x02, // magic byte
+            0xb0, 0x69, 0x45, 0x7c, // CRC
+            0x00, 0x00, // attribute
+            0x00, 0x00, 0x00, 0x00, // last offset delta
+            0x00, 0x00, 0x01, 0x91, 0xe0, 0x5a, 0xf8, 0x18, // base timestamp
+            0x00, 0x00, 0x01, 0x91, 0xe0, 0x5a, 0xf8, 0x18, // max timestamp
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // producer id
+            0xff, 0xff, // producer epoch
+            0xff, 0xff, 0xff, 0xff, // base sequence,
+            0x00, 0x00, 0x00, 0x01, // record length
+            0x3a, // length
+            0x00, // attribute
+            0x00, // timestamp delta
+            0x00, // offset delta
+            0x01, // key length, zig-zag encoded: -1
+            // null, no key
+            0x2e, // value length
+            0x01, // frame version
+            0x0c, // type
+            0x00, // version
+            0x11, // name length
+            0x6d, 0x65, 0x74, 0x61, 0x64, 0x61, 0x74, 0x61, 0x2e, 0x76, 0x65, 0x72, 0x73, 0x69,
+            0x6f, 0x6e, // name
+            0x00, 0x14, // feature level
+            0x00, // tagged field count
+            0x00, // header array count -> END OF BATCH
+            // BATCH 2
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // base offset
+            0x00, 0x00, 0x00, 0xe4, // batch length
+            0x00, 0x00, 0x00, 0x01, // partition leader epoch
+            0x02, // magic byte
+            0x24, 0xdb, 0x12, 0xdd, // CRC,
+            0x00, 0x00, // attribute
+            0x00, 0x00, 0x00, 0x02, // last offset delta
+            0x00, 0x00, 0x01, 0x91, 0xe0, 0x5b, 0x2d, 0x15, // base timestamp
+            0x00, 0x00, 0x01, 0x91, 0xe0, 0x5b, 0x2d, 0x15, // max timestamp
+            0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, // producer id
+            0xff, 0xff, // producer epoch
+            0xff, 0xff, 0xff, 0xff, // base sequence,
+            0x00, 0x00, 0x00, 0x03, // record length
+            0x3c, // length
+            0x00, // attribute,
+            0x00, // timestamp delta,
+            0x00, // offset delta
+            0x01, // key length,
+            // O byte, key is null
+            0x30, // value length
+            0x01, // frame version
+            0x02, // type: Topic record
+            0x00, // version
+            0x04, // name length, decoded to 3
+            0x73, 0x61, 0x7a, // topic name
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x91, // uuid: 16 bytes
+            0x00, // tagged field count
+            0x00, // header array count --> END OF RECORD 1
+            // RECORD2
+            0x90, 0x01, // length
+            0x00, // attribute
+            0x00, // timestamp delta
+            0x02, // offset delta
+            0x01, // key length
+            // NULL key
+            0x82, 0x01, // value length
+            0x01, // frame version
+            0x03, // type: partition
+            0x01, // version
+            0x00, 0x00, 0x00, 0x00, // partition id
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x91, // topic uuid: 16 bytes
+            0x02, // length of replica array
+            0x00, 0x00, 0x00, 0x01, // replica array
+            0x02, // length of sync replica array
+            0x00, 0x00, 0x00, 0x01, // sync replica array
+            0x01, // length of removing replica array, 0 for compact encoding
+            0x01, // length of adding replica array, 0
+            0x00, 0x00, 0x00, 0x01, // leader
+            0x00, 0x00, 0x00, 0x00, // leader epoch
+            0x00, 0x00, 0x00, 0x00, // partition epoch
+            0x02, // length of directories array
+            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01, // uuid, 16 bytes
+            0x00, // tagged field count
+            0x00, // header array count // END OF RECORD2
+            // RECORD3
+            0x90, 0x01, // length
+            0x00, // attribute
+            0x00, // timestamp delta
+            0x04, // offset delta
+            0x01, // key length
+            0x82, 0x01, // value length
+            0x01, // frame version
+            0x03, // type: partition
+            0x01, // version
+            0x00, 0x00, 0x00, 0x01, // partition id
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x91, // topic uuid: 16 bytes
+            0x02, // length of replica array
+            0x00, 0x00, 0x00, 0x01, // replica array
+            0x02, // length of sync replica array
+            0x00, 0x00, 0x00, 0x01, // sync replica array
+            0x01, // length of removing replica array, 0 for compact encoding
+            0x01, // length of adding replica array, 0
+            0x00, 0x00, 0x00, 0x01, // leader
+            0x00, 0x00, 0x00, 0x00, // leader epoch
+            0x00, 0x00, 0x00, 0x00, // partition epoch
+            0x02, // length of directories array
+            0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x01, // uuid, 16 bytes
+            0x00, // tagged field count
+            0x00, // header array count // END OF RECORD3
+        ];
+        let metadata = replay(Cursor::new(content));
+        assert!(metadata.is_ok());
+    }
 }
