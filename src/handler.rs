@@ -1,4 +1,9 @@
-use std::{io::Write, net::TcpStream, sync::Arc};
+use std::{
+    io::{self, Write},
+    net::TcpStream,
+    path::Path,
+    sync::Arc,
+};
 
 use crate::{
     metadata::Metadata,
@@ -26,18 +31,24 @@ impl Handler {
                     break;
                 }
             };
-            let response = self.handle_request(&request);
+            let response = match self.handle_request(&request) {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    continue;
+                }
+            };
             if let Err(e) = stream.write_all(&response.serialize()) {
                 eprintln!("Failed to write response: {e}");
                 break;
             }
         }
     }
-    fn handle_request(&self, request: &Request) -> Response {
+    fn handle_request(&self, request: &Request) -> io::Result<Response> {
         match &request.body {
-            RequestBody::ApiVersions => self.handle_api_version(request),
+            RequestBody::ApiVersions => Ok(self.handle_api_version(request)),
             RequestBody::DescribeTopicPartitions(_) => {
-                self.handle_describe_topic_partitions(request)
+                Ok(self.handle_describe_topic_partitions(request))
             }
             RequestBody::Fetch(_) => self.handle_fetch(request),
         }
@@ -121,32 +132,55 @@ impl Handler {
             }),
         }
     }
-    fn handle_fetch(&self, request: &Request) -> Response {
+    fn handle_fetch(&self, request: &Request) -> io::Result<Response> {
         let RequestBody::Fetch(body) = &request.body else {
             unreachable!()
         };
         let mut responses = Vec::new();
-        for id in &body.topics {
-            let partitions = match self.metadata.topics.get(&id) {
-                Some(topic) => topic
+        for fetch_topic in &body.topics {
+            let partitions = match self.metadata.topics.get(&fetch_topic.topic_id) {
+                Some(topic) => {
+                    let mut partitions = Vec::with_capacity(fetch_topic.partitions.len());
+                    for p in &fetch_topic.partitions {
+                        let partition = if topic.partitions.contains_key(&p.index) {
+                            let log_dir = Path::new("/tmp/kraft-combined-logs");
+                            FetchedPartition {
+                                index: p.index,
+                                error_code: 0,
+                                records: Some(read_partition_records(
+                                    log_dir,
+                                    &topic.name,
+                                    p.index,
+                                    p.fetch_offset,
+                                )?),
+                            }
+                        } else {
+                            FetchedPartition {
+                                index: p.index,
+                                error_code: 3,
+                                records: None,
+                            }
+                        };
+                        partitions.push(partition);
+                    }
+                    partitions
+                }
+                None => fetch_topic
                     .partitions
                     .iter()
-                    .map(|(&id, _)| FetchedPartition {
-                        index: id,
-                        error_code: 0,
+                    .map(|p| FetchedPartition {
+                        index: p.index,
+                        error_code: 100,
+                        records: None,
                     })
                     .collect(),
-                None => vec![FetchedPartition {
-                    index: 0,
-                    error_code: 100,
-                }],
             };
             responses.push(FetchedTopic {
-                topic_id: id.clone(),
+                topic_id: fetch_topic.topic_id,
                 partitions,
             });
         }
-        Response {
+        Ok(Response {
             correlation_id: request.correlation_id,
             body: ResponseBody::Fetch(FetchResponse {
                 throttle_time: 0,
@@ -154,6 +188,22 @@ impl Handler {
                 session_id: 0,
                 responses,
             }),
-        }
+        })
     }
+}
+
+fn read_partition_records(
+    log_dir: &Path,
+    topic_name: &str,
+    partition: i32,
+    fetch_offset: i64,
+) -> io::Result<Vec<u8>> {
+    let path = log_dir
+        .join(format!("{topic_name}-{partition}"))
+        .join("00000000000000000000.log");
+
+    let bytes = std::fs::read(path)?;
+
+    // TODO: filter RecordBatches by fetch_offset.
+    Ok(bytes)
 }

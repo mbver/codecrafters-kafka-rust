@@ -292,6 +292,7 @@ pub struct FetchedTopic {
 pub struct FetchedPartition {
     pub index: i32,
     pub error_code: i16,
+    pub records: Option<Vec<u8>>,
 }
 
 impl FetchResponse {
@@ -329,7 +330,7 @@ impl FetchedPartition {
         writer.write_i64(-1); // log_start_offset
         writer.write_compact_array_len(0); // aborted_transactions
         writer.write_i32(-1); // preferred_read_replica
-        writer.write_compact_nullable_bytes(None); // records
+        writer.write_compact_nullable_bytes(self.records.as_deref()); // records
         writer.write_tag_buffer();
     }
 }

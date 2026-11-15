@@ -18,8 +18,16 @@ pub struct DescribeTopicPartitionsRequest {
     pub topics: Vec<String>,
 }
 
+pub struct FetchPartition {
+    pub index: i32,
+    pub fetch_offset: i64,
+}
+pub struct FetchTopic {
+    pub topic_id: Uuid,
+    pub partitions: Vec<FetchPartition>,
+}
 pub struct FetchRequest {
-    pub topics: Vec<Uuid>,
+    pub topics: Vec<FetchTopic>,
 }
 
 pub enum RequestBody {
@@ -113,18 +121,26 @@ fn parse_fetch(reader: &mut Reader) -> io::Result<FetchRequest> {
         let topic_id = reader.read_uuid()?;
 
         let partition_length = reader.read_compact_array_len()?;
+        let mut partitions = Vec::with_capacity(partition_length);
         for _ in 0..partition_length {
-            reader.read_i32()?; // partition
+            let index = reader.read_i32()?; // partition
             reader.read_i32()?; // current_leader_epoch
-            reader.read_i64()?; // fetch_offset
+            let fetch_offset = reader.read_i64()?; // fetch_offset
             reader.read_i32()?; // last_fetched_epoch
             reader.read_i64()?; // log_start_offset
             reader.read_i32()?; // partition_max_bytes
+            partitions.push(FetchPartition {
+                index,
+                fetch_offset,
+            });
         }
 
         reader.read_tag_buffer()?; // topic tagged fields
 
-        topics.push(topic_id);
+        topics.push(FetchTopic {
+            topic_id,
+            partitions,
+        });
     }
     Ok(FetchRequest { topics })
 }
