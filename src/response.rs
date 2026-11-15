@@ -18,6 +18,19 @@ impl Writer {
     fn write_i32(&mut self, value: i32) {
         self.buf.extend_from_slice(&value.to_be_bytes());
     }
+    pub fn write_i64(&mut self, value: i64) {
+        self.buf.extend_from_slice(&value.to_be_bytes());
+    }
+
+    pub fn write_compact_nullable_bytes(&mut self, value: Option<&[u8]>) {
+        match value {
+            Some(bytes) => {
+                self.write_uvarint((bytes.len() + 1) as u32);
+                self.buf.extend_from_slice(bytes);
+            }
+            None => self.write_uvarint(0),
+        }
+    }
     fn write_bytes(&mut self, bytes: &[u8]) {
         self.buf.extend_from_slice(bytes);
     }
@@ -311,5 +324,12 @@ impl FetchedPartition {
     fn serialize_into(&self, writer: &mut Writer) {
         writer.write_i32(self.index);
         writer.write_i16(self.error_code);
+        writer.write_i64(-1); // high_watermark
+        writer.write_i64(-1); // last_stable_offset
+        writer.write_i64(-1); // log_start_offset
+        writer.write_compact_array_len(0); // aborted_transactions
+        writer.write_i32(-1); // preferred_read_replica
+        writer.write_compact_nullable_bytes(None); // records
+        writer.write_tag_buffer();
     }
 }
