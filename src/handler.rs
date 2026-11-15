@@ -71,47 +71,47 @@ impl Handler {
         let RequestBody::DescribeTopicPartitions(body) = &request.body else {
             unreachable!()
         };
-        let id = self.metadata.topic_names.get(&body.topic_name);
-        match id {
-            Some(id) => {
-                let topic = self.metadata.topics.get(&id).unwrap();
-                let mut partitions: Vec<PartitionMetadata> = topic
-                    .partitions
-                    .iter()
-                    .map(|(&id, partition)| (id, partition).into())
-                    .collect();
-                partitions.sort_by_key(|p| p.partition_index);
-                Response {
-                    correlation_id: request.correlation_id,
-                    body: ResponseBody::DescribeTopicPartitions(DescribeTopicPartitionsResponse {
-                        throttle_time_ms: 0,
-                        topics: vec![TopicMetadata {
+        let topics: Vec<TopicMetadata> = body
+            .topics
+            .iter()
+            .map(|topic_name| {
+                let id = self.metadata.topic_names.get(topic_name);
+                match id {
+                    Some(id) => {
+                        let topic = self.metadata.topics.get(&id).unwrap();
+                        let mut partitions: Vec<PartitionMetadata> = topic
+                            .partitions
+                            .iter()
+                            .map(|(&id, partition)| (id, partition).into())
+                            .collect();
+                        partitions.sort_by_key(|p| p.partition_index);
+                        TopicMetadata {
                             error_code: 0,
-                            topic_name: body.topic_name.clone(),
+                            topic_name: topic_name.clone(),
                             topic_id: id.as_bytes().clone(),
                             is_internal: true, // is this correct?
                             partitions,
                             topic_authorized_operations: 0, // is this correct?
-                        }],
-                        next_cursor: -1,
-                    }),
-                }
-            }
-            None => Response {
-                correlation_id: request.correlation_id,
-                body: ResponseBody::DescribeTopicPartitions(DescribeTopicPartitionsResponse {
-                    throttle_time_ms: 0,
-                    topics: vec![TopicMetadata {
+                        }
+                    }
+                    None => TopicMetadata {
                         error_code: 3,
-                        topic_name: body.topic_name.clone(),
+                        topic_name: topic_name.clone(),
                         topic_id: [0u8; 16],
                         is_internal: false,
                         partitions: vec![],
                         topic_authorized_operations: 0,
-                    }],
-                    next_cursor: -1,
-                }),
-            },
+                    },
+                }
+            })
+            .collect();
+        Response {
+            correlation_id: request.correlation_id,
+            body: ResponseBody::DescribeTopicPartitions(DescribeTopicPartitionsResponse {
+                throttle_time_ms: 0,
+                topics,
+                next_cursor: -1,
+            }),
         }
     }
 }

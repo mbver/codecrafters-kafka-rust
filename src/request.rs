@@ -13,7 +13,7 @@ pub struct Request {
 }
 
 pub struct DescribeTopicPartitionsRequest {
-    pub topic_name: String,
+    pub topics: Vec<String>,
 }
 
 pub enum RequestBody {
@@ -54,18 +54,12 @@ pub fn parse_request(stream: &mut TcpStream) -> io::Result<Request> {
 fn parse_describe_topic_partitions(
     reader: &mut Reader,
 ) -> io::Result<DescribeTopicPartitionsRequest> {
-    let array_len = reader.read_uvarint()?;
-
-    if array_len != 2 {
-        return Err(io_invalid_data(&format!(
-            "expect exactly 1 topic in the array, got {}",
-            array_len - 1,
-        )));
+    let array_len = reader.read_uvarint()?.saturating_sub(1) as usize;
+    let mut topics: Vec<String> = Vec::with_capacity(array_len);
+    for _ in 0..array_len {
+        topics.push(reader.read_compact_string()?);
+        reader.read_tag_buffer()?; // topic tag buffer
     }
-
-    let topic_name = reader.read_compact_string()?;
-    reader.read_tag_buffer()?; // topic tag buffer
     reader.read_tag_buffer()?; // request tag buffer
-
-    Ok(DescribeTopicPartitionsRequest { topic_name })
+    Ok(DescribeTopicPartitionsRequest { topics })
 }
