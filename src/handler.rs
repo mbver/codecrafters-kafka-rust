@@ -127,6 +127,7 @@ impl Handler {
             body: ResponseBody::Fetch(FetchResponse {
                 throttle_time: 0,
                 error_code: 0,
+                session_id: 0,
                 responses: Vec::new(),
             }),
         }

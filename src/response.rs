@@ -232,6 +232,7 @@ impl PartitionMetadata {
 pub struct FetchResponse {
     pub throttle_time: i32,
     pub error_code: i16,
+    pub session_id: i32,
     pub responses: Vec<TopicMetadata>,
 }
 
@@ -239,6 +240,8 @@ impl FetchResponse {
     fn serialize_into(&self, writer: &mut Writer) {
         writer.write_i32(self.throttle_time);
         writer.write_i16(self.error_code);
+        writer.write_i32(self.session_id);
         writer.write_compact_array_len(0);
+        writer.write_tag_buffer();
     }
 }
