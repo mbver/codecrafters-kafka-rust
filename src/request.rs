@@ -3,6 +3,8 @@ use std::{
     net::TcpStream,
 };
 
+use uuid::Uuid;
+
 use crate::reader::{Reader, io_invalid_data};
 
 pub struct Request {
@@ -16,7 +18,9 @@ pub struct DescribeTopicPartitionsRequest {
     pub topics: Vec<String>,
 }
 
-pub struct FetchRequest;
+pub struct FetchRequest {
+    pub topics: Vec<Uuid>,
+}
 
 pub enum RequestBody {
     ApiVersions,
@@ -71,6 +75,44 @@ fn parse_describe_topic_partitions(
     Ok(DescribeTopicPartitionsRequest { topics })
 }
 
-fn parse_fetch(_reader: &mut Reader) -> io::Result<FetchRequest> {
-    Ok(FetchRequest)
+/* FetchRequest V16
+max_wait_ms => INT32
+min_bytes => INT32
+max_bytes => INT32
+isolation_level => INT8
+session_id => INT32
+session_epoch => INT32
+topics => topic_id [partitions]
+  topic_id => UUID
+  partitions => partition current_leader_epoch fetch_offset last_fetched_epoch log_start_offset partition_max_bytes
+    partition => INT32
+    current_leader_epoch => INT32
+    fetch_offset => INT64
+    last_fetched_epoch => INT32
+    log_start_offset => INT64
+    partition_max_bytes => INT32
+forgotten_topics_data => topic_id [partitions]
+  topic_id => UUID
+  partitions => INT32
+rack_id => COMPACT_STRING
+cluster_id<tag: 0> => COMPACT_NULLABLE_STRING
+replica_state<tag: 1> => replica_id replica_epoch
+  replica_id => INT32
+  replica_epoch => INT64
+*/
+fn parse_fetch(reader: &mut Reader) -> io::Result<FetchRequest> {
+    reader.read_i32()?; // max_wait_ms
+    reader.read_i32()?; // min_bytes
+    reader.read_i32()?; // max_bytes
+    reader.read_i8()?; // isolation_level
+    reader.read_i32()?; // session id
+    reader.read_i32()?; // session_epoch
+    let length = reader.read_compact_array_len()?;
+    if length != 1 {
+        return Err(io_invalid_data("length is not 1"));
+    }
+    let mut topics = Vec::with_capacity(length);
+    let topic_id = reader.read_uuid()?;
+    topics.push(topic_id);
+    Ok(FetchRequest { topics })
 }

@@ -5,7 +5,7 @@ use crate::{
     request::{Request, RequestBody, parse_request},
     response::{
         ApiKey, ApiVersionsResponse, DescribeTopicPartitionsResponse, FetchResponse,
-        PartitionMetadata, Response, ResponseBody, TopicMetadata,
+        FetchedPartition, FetchedTopic, PartitionMetadata, Response, ResponseBody, TopicMetadata,
     },
 };
 
@@ -122,13 +122,37 @@ impl Handler {
         }
     }
     fn handle_fetch(&self, request: &Request) -> Response {
+        let RequestBody::Fetch(body) = &request.body else {
+            unreachable!()
+        };
+        let mut responses = Vec::new();
+        for id in &body.topics {
+            let partitions = match self.metadata.topics.get(&id) {
+                Some(topic) => topic
+                    .partitions
+                    .iter()
+                    .map(|(&id, _)| FetchedPartition {
+                        index: id,
+                        error_code: 0,
+                    })
+                    .collect(),
+                None => vec![FetchedPartition {
+                    index: 0,
+                    error_code: 100,
+                }],
+            };
+            responses.push(FetchedTopic {
+                topic_id: id.clone(),
+                partitions,
+            });
+        }
         Response {
             correlation_id: request.correlation_id,
             body: ResponseBody::Fetch(FetchResponse {
                 throttle_time: 0,
                 error_code: 0,
                 session_id: 0,
-                responses: Vec::new(),
+                responses,
             }),
         }
     }

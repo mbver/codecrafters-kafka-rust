@@ -1,3 +1,5 @@
+use uuid::Uuid;
+
 use crate::metadata::Partition;
 
 struct Writer {
@@ -228,12 +230,55 @@ impl PartitionMetadata {
         writer.write_tag_buffer();
     }
 }
+/*
+* Fetch Response (Version: 16) => throttle_time_ms error_code session_id [responses] [node_endpoints]<tag: 0>
+  throttle_time_ms => INT32
+  error_code => INT16
+  session_id => INT32
+  responses => topic_id [partitions]
+    topic_id => UUID
+    partitions => partition_index error_code high_watermark last_stable_offset log_start_offset [aborted_transactions] preferred_read_replica records diverging_epoch<tag: 0> current_leader<tag: 1> snapshot_id<tag: 2>
+      partition_index => INT32
+      error_code => INT16
+      high_watermark => INT64
+      last_stable_offset => INT64
+      log_start_offset => INT64
+      aborted_transactions => producer_id first_offset
+        producer_id => INT64
+        first_offset => INT64
+      preferred_read_replica => INT32
+      records => COMPACT_RECORDS
+      diverging_epoch<tag: 0> => epoch end_offset
+        epoch => INT32
+        end_offset => INT64
+      current_leader<tag: 1> => leader_id leader_epoch
+        leader_id => INT32
+        leader_epoch => INT32
+      snapshot_id<tag: 2> => end_offset epoch
+        end_offset => INT64
+        epoch => INT32
+  node_endpoints<tag: 0> => node_id host port rack
+    node_id => INT32
+    host => COMPACT_STRING
+    port => INT32
+    rack => COMPACT_NULLABLE_STRING
 
+*/
 pub struct FetchResponse {
     pub throttle_time: i32,
     pub error_code: i16,
     pub session_id: i32,
-    pub responses: Vec<TopicMetadata>,
+    pub responses: Vec<FetchedTopic>,
+}
+
+pub struct FetchedTopic {
+    pub topic_id: Uuid,
+    pub partitions: Vec<FetchedPartition>,
+}
+
+pub struct FetchedPartition {
+    pub index: i32,
+    pub error_code: i16,
 }
 
 impl FetchResponse {
@@ -242,7 +287,29 @@ impl FetchResponse {
         writer.write_i32(self.throttle_time);
         writer.write_i16(self.error_code);
         writer.write_i32(self.session_id);
-        writer.write_compact_array_len(0);
+        writer.write_compact_array_len(self.responses.len());
+        for topic in &self.responses {
+            topic.serialize_into(writer);
+            writer.write_tag_buffer();
+        }
         writer.write_tag_buffer();
+    }
+}
+
+impl FetchedTopic {
+    fn serialize_into(&self, writer: &mut Writer) {
+        writer.write_uuid(&self.topic_id.into_bytes());
+        writer.write_compact_array_len(self.partitions.len());
+        for partition in &self.partitions {
+            partition.serialize_into(writer);
+            writer.write_tag_buffer();
+        }
+    }
+}
+
+impl FetchedPartition {
+    fn serialize_into(&self, writer: &mut Writer) {
+        writer.write_i32(self.index);
+        writer.write_i16(self.error_code);
     }
 }

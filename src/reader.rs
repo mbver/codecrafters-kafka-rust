@@ -114,7 +114,7 @@ impl<'a> Reader<'a> {
 
         Ok(values)
     }
-    fn read_compact_array_len(&mut self) -> io::Result<usize> {
+    pub fn read_compact_array_len(&mut self) -> io::Result<usize> {
         let len = self.read_uvarint()?;
 
         if len == 0 {
