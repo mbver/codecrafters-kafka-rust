@@ -53,6 +53,11 @@ impl Handler {
                 error_code,
                 api_keys: vec![
                     ApiKey {
+                        api_key: 1,
+                        min_version: 0,
+                        max_version: 16,
+                    },
+                    ApiKey {
                         api_key: 18,
                         min_version: 0,
                         max_version: 4,
