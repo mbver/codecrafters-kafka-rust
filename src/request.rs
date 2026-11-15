@@ -108,11 +108,23 @@ fn parse_fetch(reader: &mut Reader) -> io::Result<FetchRequest> {
     reader.read_i32()?; // session id
     reader.read_i32()?; // session_epoch
     let length = reader.read_compact_array_len()?;
-    if length != 1 {
-        return Err(io_invalid_data("length is not 1"));
-    }
     let mut topics = Vec::with_capacity(length);
-    let topic_id = reader.read_uuid()?;
-    topics.push(topic_id);
+    for _ in 0..length {
+        let topic_id = reader.read_uuid()?;
+
+        let partition_length = reader.read_compact_array_len()?;
+        for _ in 0..partition_length {
+            reader.read_i32()?; // partition
+            reader.read_i32()?; // current_leader_epoch
+            reader.read_i64()?; // fetch_offset
+            reader.read_i32()?; // last_fetched_epoch
+            reader.read_i64()?; // log_start_offset
+            reader.read_i32()?; // partition_max_bytes
+        }
+
+        reader.read_tag_buffer()?; // topic tagged fields
+
+        topics.push(topic_id);
+    }
     Ok(FetchRequest { topics })
 }
