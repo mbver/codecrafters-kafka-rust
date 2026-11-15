@@ -4,8 +4,8 @@ use crate::{
     metadata::Metadata,
     request::{Request, RequestBody, parse_request},
     response::{
-        ApiKey, ApiVersionsResponse, DescribeTopicPartitionsResponse, PartitionMetadata, Response,
-        ResponseBody, TopicMetadata,
+        ApiKey, ApiVersionsResponse, DescribeTopicPartitionsResponse, FetchResponse,
+        PartitionMetadata, Response, ResponseBody, TopicMetadata,
     },
 };
 
@@ -39,6 +39,7 @@ impl Handler {
             RequestBody::DescribeTopicPartitions(_) => {
                 self.handle_describe_topic_partitions(request)
             }
+            RequestBody::Fetch(_) => self.handle_fetch(request),
         }
     }
     fn handle_api_version(&self, request: &Request) -> Response {
@@ -117,6 +118,16 @@ impl Handler {
                 throttle_time_ms: 0,
                 topics,
                 next_cursor: -1,
+            }),
+        }
+    }
+    fn handle_fetch(&self, request: &Request) -> Response {
+        Response {
+            correlation_id: request.correlation_id,
+            body: ResponseBody::Fetch(FetchResponse {
+                throttle_time: 0,
+                error_code: 0,
+                responses: Vec::new(),
             }),
         }
     }

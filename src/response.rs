@@ -61,6 +61,7 @@ pub struct Response {
 pub enum ResponseBody {
     ApiVersions(ApiVersionsResponse),
     DescribeTopicPartitions(DescribeTopicPartitionsResponse),
+    Fetch(FetchResponse),
 }
 
 impl ResponseBody {
@@ -70,6 +71,9 @@ impl ResponseBody {
                 body.serialize_into(writer);
             }
             ResponseBody::DescribeTopicPartitions(body) => {
+                body.serialize_into(writer);
+            }
+            ResponseBody::Fetch(body) => {
                 body.serialize_into(writer);
             }
         }
@@ -222,5 +226,19 @@ impl PartitionMetadata {
         }
 
         writer.write_tag_buffer();
+    }
+}
+
+pub struct FetchResponse {
+    pub throttle_time: i32,
+    pub error_code: i16,
+    pub responses: Vec<TopicMetadata>,
+}
+
+impl FetchResponse {
+    fn serialize_into(&self, writer: &mut Writer) {
+        writer.write_i32(self.throttle_time);
+        writer.write_i16(self.error_code);
+        writer.write_compact_array_len(0);
     }
 }

@@ -16,9 +16,12 @@ pub struct DescribeTopicPartitionsRequest {
     pub topics: Vec<String>,
 }
 
+pub struct FetchRequest;
+
 pub enum RequestBody {
     ApiVersions,
     DescribeTopicPartitions(DescribeTopicPartitionsRequest),
+    Fetch(FetchRequest),
 }
 pub fn parse_request(stream: &mut TcpStream) -> io::Result<Request> {
     let mut size_buf = [0u8; 4];
@@ -36,6 +39,10 @@ pub fn parse_request(stream: &mut TcpStream) -> io::Result<Request> {
     let _client_id = reader.read_nullable_string()?;
     reader.read_tag_buffer()?;
     let body = match api_key {
+        1 => {
+            let req = parse_fetch(&mut reader)?;
+            RequestBody::Fetch(req)
+        }
         18 => RequestBody::ApiVersions,
         75 => {
             let req = parse_describe_topic_partitions(&mut reader)?;
@@ -62,4 +69,8 @@ fn parse_describe_topic_partitions(
     }
     reader.read_tag_buffer()?; // request tag buffer
     Ok(DescribeTopicPartitionsRequest { topics })
+}
+
+fn parse_fetch(_reader: &mut Reader) -> io::Result<FetchRequest> {
+    Ok(FetchRequest)
 }
