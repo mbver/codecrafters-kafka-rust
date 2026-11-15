@@ -71,7 +71,7 @@ impl Handler {
         let RequestBody::DescribeTopicPartitions(body) = &request.body else {
             unreachable!()
         };
-        let topics: Vec<TopicMetadata> = body
+        let mut topics: Vec<TopicMetadata> = body
             .topics
             .iter()
             .map(|topic_name| {
@@ -89,7 +89,7 @@ impl Handler {
                             error_code: 0,
                             topic_name: topic_name.clone(),
                             topic_id: id.as_bytes().clone(),
-                            is_internal: true, // is this correct?
+                            is_internal: topic_name.starts_with("__"),
                             partitions,
                             topic_authorized_operations: 0, // is this correct?
                         }
@@ -105,6 +105,7 @@ impl Handler {
                 }
             })
             .collect();
+        topics.sort_by_key(|t| t.topic_name.clone());
         Response {
             correlation_id: request.correlation_id,
             body: ResponseBody::DescribeTopicPartitions(DescribeTopicPartitionsResponse {
