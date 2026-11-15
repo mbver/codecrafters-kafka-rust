@@ -238,6 +238,7 @@ pub struct FetchResponse {
 
 impl FetchResponse {
     fn serialize_into(&self, writer: &mut Writer) {
+        writer.write_tag_buffer();
         writer.write_i32(self.throttle_time);
         writer.write_i16(self.error_code);
         writer.write_i32(self.session_id);
