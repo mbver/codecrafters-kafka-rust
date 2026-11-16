@@ -50,6 +50,9 @@ impl Writer {
         self.write_uvarint((value.len() + 1) as u32);
         self.write_bytes(value.as_bytes());
     }
+    fn write_compact_nullable_string(&mut self, value: Option<&str>) {
+        self.write_compact_nullable_bytes(value.map(str::as_bytes));
+    }
     fn write_tag_buffer(&mut self) {
         self.write_u8(0);
     }
@@ -77,6 +80,7 @@ pub enum ResponseBody {
     ApiVersions(ApiVersionsResponse),
     DescribeTopicPartitions(DescribeTopicPartitionsResponse),
     Fetch(FetchResponse),
+    Produce(ProduceResponse),
 }
 
 impl ResponseBody {
@@ -89,6 +93,9 @@ impl ResponseBody {
                 body.serialize_into(writer);
             }
             ResponseBody::Fetch(body) => {
+                body.serialize_into(writer);
+            }
+            ResponseBody::Produce(body) => {
                 body.serialize_into(writer);
             }
         }
@@ -331,6 +338,89 @@ impl FetchedPartition {
         writer.write_compact_array_len(0); // aborted_transactions
         writer.write_i32(-1); // preferred_read_replica
         writer.write_compact_nullable_bytes(self.records.as_deref()); // records
+        writer.write_tag_buffer();
+    }
+}
+
+pub struct ProduceResponse {
+    pub topics: Vec<ProduceTopic>,
+    pub throttle_time_ms: i32,
+}
+
+pub struct ProduceTopic {
+    pub name: String,
+    pub partitions: Vec<ProducePartition>,
+}
+
+pub struct ProducePartition {
+    pub index: i32,
+    pub error_code: i16,
+    pub base_offset: i64,
+    pub log_append_time_ms: i64,
+    pub log_start_offset: i64,
+    pub record_errors: Vec<RecordError>,
+    pub error_message: Option<String>,
+}
+
+pub struct RecordError {
+    pub batch_index: i32,
+    pub batch_index_error_message: Option<String>,
+}
+
+impl ProduceResponse {
+    fn serialize_into(&self, writer: &mut Writer) {
+        writer.write_compact_array_len(self.topics.len());
+
+        for topic in &self.topics {
+            topic.serialize_into(writer);
+        }
+
+        writer.write_i32(self.throttle_time_ms);
+
+        // node_endpoints tagged field (tag 0) omitted.
+        writer.write_tag_buffer();
+    }
+}
+
+impl ProduceTopic {
+    fn serialize_into(&self, writer: &mut Writer) {
+        writer.write_compact_string(&self.name);
+
+        writer.write_compact_array_len(self.partitions.len());
+        for partition in &self.partitions {
+            partition.serialize_into(writer);
+        }
+
+        writer.write_tag_buffer();
+    }
+}
+
+impl ProducePartition {
+    fn serialize_into(&self, writer: &mut Writer) {
+        writer.write_i32(self.index);
+        writer.write_i16(self.error_code);
+        writer.write_i64(self.base_offset);
+        writer.write_i64(self.log_append_time_ms);
+        writer.write_i64(self.log_start_offset);
+
+        writer.write_compact_array_len(self.record_errors.len());
+        for error in &self.record_errors {
+            error.serialize_into(writer);
+        }
+
+        writer.write_compact_nullable_string(self.error_message.as_deref());
+
+        // current_leader tagged field (tag 0) omitted.
+        writer.write_tag_buffer();
+    }
+}
+
+impl RecordError {
+    fn serialize_into(&self, writer: &mut Writer) {
+        writer.write_i32(self.batch_index);
+
+        writer.write_compact_nullable_string(self.batch_index_error_message.as_deref());
+
         writer.write_tag_buffer();
     }
 }

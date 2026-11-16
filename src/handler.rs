@@ -1,5 +1,6 @@
 use std::{
-    io::{self, Write},
+    fs::{self, File, OpenOptions},
+    io::{self, BufReader, Read, Seek, SeekFrom, Write},
     net::TcpStream,
     path::Path,
     sync::Arc,
@@ -10,7 +11,8 @@ use crate::{
     request::{Request, RequestBody, parse_request},
     response::{
         ApiKey, ApiVersionsResponse, DescribeTopicPartitionsResponse, FetchResponse,
-        FetchedPartition, FetchedTopic, PartitionMetadata, Response, ResponseBody, TopicMetadata,
+        FetchedPartition, FetchedTopic, PartitionMetadata, ProducePartition, ProduceResponse,
+        ProduceTopic, Response, ResponseBody, TopicMetadata,
     },
 };
 
@@ -51,6 +53,7 @@ impl Handler {
                 Ok(self.handle_describe_topic_partitions(request))
             }
             RequestBody::Fetch(_) => self.handle_fetch(request),
+            RequestBody::Produce(_) => self.handle_produce(request),
         }
     }
     fn handle_api_version(&self, request: &Request) -> Response {
@@ -190,6 +193,85 @@ impl Handler {
             }),
         })
     }
+    fn handle_produce(&self, request: &Request) -> io::Result<Response> {
+        let RequestBody::Produce(body) = &request.body else {
+            unreachable!()
+        };
+
+        let mut topics = Vec::with_capacity(body.topics.len());
+
+        for produce_topic in &body.topics {
+            let mut partitions = Vec::with_capacity(produce_topic.partitions.len());
+
+            let topic = self
+                .metadata
+                .topic_names
+                .get(&produce_topic.name)
+                .and_then(|id| self.metadata.topics.get(id));
+
+            for produce_partition in &produce_topic.partitions {
+                let partition_response = match topic {
+                    Some(topic) if topic.partitions.contains_key(&produce_partition.index) => {
+                        match &produce_partition.records {
+                            Some(records) => {
+                                let log_dir = Path::new("/tmp/kraft-combined-logs");
+
+                                let base_offset = append_record_batches(
+                                    log_dir,
+                                    &produce_topic.name,
+                                    produce_partition.index,
+                                    records,
+                                )?;
+
+                                ProducePartition {
+                                    index: produce_partition.index,
+                                    error_code: 0,
+                                    base_offset,
+                                    log_append_time_ms: -1,
+                                    log_start_offset: 0,
+                                    record_errors: vec![],
+                                    error_message: None,
+                                }
+                            }
+                            None => ProducePartition {
+                                index: produce_partition.index,
+                                error_code: 87, // INVALID_RECORD
+                                base_offset: -1,
+                                log_append_time_ms: -1,
+                                log_start_offset: -1,
+                                record_errors: vec![],
+                                error_message: Some("records is null".to_string()),
+                            },
+                        }
+                    }
+                    _ => ProducePartition {
+                        index: produce_partition.index,
+                        error_code: 3, // UNKNOWN_TOPIC_OR_PARTITION
+                        base_offset: -1,
+                        log_append_time_ms: -1,
+                        log_start_offset: -1,
+                        record_errors: vec![],
+                        error_message: None,
+                    },
+                };
+
+                partitions.push(partition_response);
+            }
+
+            topics.push(ProduceTopic {
+                name: produce_topic.name.clone(),
+                partitions,
+            });
+        }
+
+        Ok(Response {
+            correlation_id: request.correlation_id,
+            body: ResponseBody::Produce(ProduceResponse {
+                topics,
+                throttle_time_ms: 0,
+            }),
+        })
+    }
 }
 
 fn read_partition_records(
@@ -206,4 +288,107 @@ fn read_partition_records(
 
     // TODO: filter RecordBatches by fetch_offset.
     Ok(bytes)
+}
+
+fn read_next_offset(path: &Path) -> io::Result<i64> {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e),
+    };
+
+    let mut reader = BufReader::new(file);
+    let mut next_offset = 0i64;
+
+    loop {
+        let mut header = [0u8; 12];
+
+        if reader.read(&mut header[..1])? == 0 {
+            break;
+        }
+
+        reader.read_exact(&mut header[1..])?;
+
+        let base_offset = i64::from_be_bytes(header[..8].try_into().unwrap());
+        let batch_length = i32::from_be_bytes(header[8..12].try_into().unwrap());
+
+        if batch_length < 15 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid record batch length",
+            ));
+        }
+
+        let mut details = [0u8; 15];
+        reader.read_exact(&mut details)?;
+
+        let last_offset_delta = i32::from_be_bytes(details[11..15].try_into().unwrap());
+
+        next_offset = next_offset.max(base_offset + last_offset_delta as i64 + 1);
+
+        reader.seek(SeekFrom::Current((batch_length - 15) as i64))?;
+    }
+
+    Ok(next_offset)
+}
+
+fn append_record_batches(
+    log_dir: &Path,
+    topic_name: &str,
+    partition: i32,
+    records: &[u8],
+) -> io::Result<i64> {
+    let partition_dir = log_dir.join(format!("{topic_name}-{partition}"));
+    fs::create_dir_all(&partition_dir)?;
+
+    let path = partition_dir.join("00000000000000000000.log");
+
+    let mut next_offset = read_next_offset(&path)?;
+    let base_offset = next_offset;
+
+    let mut records = records.to_vec();
+    let mut offset = 0;
+
+    while offset < records.len() {
+        if records.len() - offset < 27 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "incomplete record batch",
+            ));
+        }
+
+        let batch_length = i32::from_be_bytes(records[offset + 8..offset + 12].try_into().unwrap());
+
+        if batch_length < 15 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid record batch length",
+            ));
+        }
+
+        let batch_size = 12 + batch_length as usize;
+
+        if batch_size > records.len() - offset {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "incomplete record batch",
+            ));
+        }
+
+        let last_offset_delta =
+            i32::from_be_bytes(records[offset + 23..offset + 27].try_into().unwrap());
+
+        // Assign the broker's base offset.
+        records[offset..offset + 8].copy_from_slice(&next_offset.to_be_bytes());
+
+        next_offset += last_offset_delta as i64 + 1;
+        offset += batch_size;
+    }
+
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+
+    file.write_all(&records)?;
+    file.flush()?;
+
+    Ok(base_offset)
 }

@@ -30,10 +30,28 @@ pub struct FetchRequest {
     pub topics: Vec<FetchTopic>,
 }
 
+pub struct ProduceRequest {
+    pub transactional_id: Option<String>,
+    pub required_acks: i16,
+    pub timeout_ms: i32,
+    pub topics: Vec<ProduceTopic>,
+}
+
+pub struct ProduceTopic {
+    pub name: String,
+    pub partitions: Vec<ProducePartition>,
+}
+
+pub struct ProducePartition {
+    pub index: i32,
+    pub records: Option<Vec<u8>>,
+}
+
 pub enum RequestBody {
     ApiVersions,
     DescribeTopicPartitions(DescribeTopicPartitionsRequest),
     Fetch(FetchRequest),
+    Produce(ProduceRequest),
 }
 pub fn parse_request(stream: &mut TcpStream) -> io::Result<Request> {
     let mut size_buf = [0u8; 4];
@@ -51,6 +69,10 @@ pub fn parse_request(stream: &mut TcpStream) -> io::Result<Request> {
     let _client_id = reader.read_nullable_string()?;
     reader.read_tag_buffer()?;
     let body = match api_key {
+        0 => {
+            let req = parse_produce(&mut reader)?;
+            RequestBody::Produce(req)
+        }
         1 => {
             let req = parse_fetch(&mut reader)?;
             RequestBody::Fetch(req)
@@ -143,4 +165,42 @@ fn parse_fetch(reader: &mut Reader) -> io::Result<FetchRequest> {
         });
     }
     Ok(FetchRequest { topics })
+}
+
+fn parse_produce(reader: &mut Reader) -> io::Result<ProduceRequest> {
+    let transactional_id = reader.read_compact_nullable_string()?;
+    let required_acks = reader.read_i16()?;
+    let timeout_ms = reader.read_i32()?;
+
+    let topic_length = reader.read_compact_array_len()?;
+    let mut topics = Vec::with_capacity(topic_length);
+
+    for _ in 0..topic_length {
+        let name = reader.read_compact_string()?;
+
+        let partition_length = reader.read_compact_array_len()?;
+        let mut partitions = Vec::with_capacity(partition_length);
+
+        for _ in 0..partition_length {
+            let index = reader.read_i32()?;
+            let records = reader.read_compact_nullable_bytes()?;
+
+            reader.read_tag_buffer()?; // partition tagged fields
+
+            partitions.push(ProducePartition { index, records });
+        }
+
+        reader.read_tag_buffer()?; // topic tagged fields
+
+        topics.push(ProduceTopic { name, partitions });
+    }
+
+    reader.read_tag_buffer()?; // request tagged fields
+
+    Ok(ProduceRequest {
+        transactional_id,
+        required_acks,
+        timeout_ms,
+        topics,
+    })
 }

@@ -197,6 +197,29 @@ impl<'a> Reader<'a> {
 
         Ok(Some(s.to_owned()))
     }
+    pub fn read_compact_nullable_bytes(&mut self) -> io::Result<Option<Vec<u8>>> {
+        let length = self.read_uvarint()?;
+
+        if length == 0 {
+            return Ok(None);
+        }
+
+        let bytes = self.read_bytes(length - 1)?.to_vec();
+        Ok(Some(bytes))
+    }
+    pub fn read_compact_nullable_string(&mut self) -> io::Result<Option<String>> {
+        let length = self.read_uvarint()? as usize;
+
+        if length == 0 {
+            return Ok(None);
+        }
+
+        let bytes = self.read_bytes(length - 1)?;
+        let value = String::from_utf8(bytes.to_vec())
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+        Ok(Some(value))
+    }
     pub fn read_tag_buffer(&mut self) -> io::Result<()> {
         if self.read_u8()? != 0 {
             return Err(io_invalid_data("expect tag buffer to be 0"));
