@@ -82,6 +82,11 @@ impl Handler {
                         min_version: 0,
                         max_version: 0,
                     },
+                    ApiKey {
+                        api_key: 0,
+                        min_version: 0,
+                        max_version: 11,
+                    },
                 ],
                 throttle_time_ms: 0,
             }),
