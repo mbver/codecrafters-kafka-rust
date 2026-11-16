@@ -369,6 +369,7 @@ pub struct RecordError {
 
 impl ProduceResponse {
     fn serialize_into(&self, writer: &mut Writer) {
+        writer.write_tag_buffer();
         writer.write_compact_array_len(self.topics.len());
 
         for topic in &self.topics {
