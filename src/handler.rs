@@ -295,6 +295,10 @@ fn read_partition_records(
     Ok(bytes)
 }
 
+// the file might already have several record batches
+// we will read each batch's header to compute the next_offset
+// we also skip reading the batch and seek to the end for next batch or EOF
+// the loop terminate at EOF
 fn read_next_offset(path: &Path) -> io::Result<i64> {
     let file = match File::open(path) {
         Ok(file) => file,
@@ -309,6 +313,7 @@ fn read_next_offset(path: &Path) -> io::Result<i64> {
         let mut header = [0u8; 12];
 
         if reader.read(&mut header[..1])? == 0 {
+            // EOF, terminate
             break;
         }
 
@@ -337,6 +342,9 @@ fn read_next_offset(path: &Path) -> io::Result<i64> {
     Ok(next_offset)
 }
 
+// the records have the messages but it doesn't have the base_offset for each record_batch
+// we will read through it to assign base_offset to each record_batch
+// after all record_batch have base_offset, we write records to the end of the file
 fn append_record_batches(
     log_dir: &Path,
     topic_name: &str,
@@ -352,18 +360,19 @@ fn append_record_batches(
     let base_offset = next_offset;
 
     let mut records = records.to_vec();
-    let mut offset = 0;
+    let mut position = 0;
 
-    while offset < records.len() {
-        if records.len() - offset < 27 {
+    while position < records.len() {
+        // each batch need a 27-byte header
+        if records.len() - position < 27 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "incomplete record batch",
             ));
         }
 
-        let batch_length = i32::from_be_bytes(records[offset + 8..offset + 12].try_into().unwrap());
-
+        let batch_length =
+            i32::from_be_bytes(records[position + 8..position + 12].try_into().unwrap());
         if batch_length < 15 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -373,7 +382,7 @@ fn append_record_batches(
 
         let batch_size = 12 + batch_length as usize;
 
-        if batch_size > records.len() - offset {
+        if batch_size > records.len() - position {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "incomplete record batch",
@@ -381,13 +390,13 @@ fn append_record_batches(
         }
 
         let last_offset_delta =
-            i32::from_be_bytes(records[offset + 23..offset + 27].try_into().unwrap());
+            i32::from_be_bytes(records[position + 23..position + 27].try_into().unwrap()); // how many records in the batch
 
         // Assign the broker's base offset.
-        records[offset..offset + 8].copy_from_slice(&next_offset.to_be_bytes());
+        records[position..position + 8].copy_from_slice(&next_offset.to_be_bytes());
 
         next_offset += last_offset_delta as i64 + 1;
-        offset += batch_size;
+        position += batch_size;
     }
 
     let mut file = OpenOptions::new().create(true).append(true).open(path)?;
